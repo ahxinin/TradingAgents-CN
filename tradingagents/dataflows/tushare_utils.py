@@ -11,7 +11,14 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple, Union
 import warnings
 import time
+
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
 warnings.filterwarnings('ignore')
+
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
 
 # 导入缓存管理器
 try:
@@ -19,7 +26,7 @@ try:
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False
-    print("⚠️ 缓存管理器不可用")
+    logger.warning("⚠️ 缓存管理器不可用")
 
 # 导入Tushare
 try:
@@ -27,7 +34,7 @@ try:
     TUSHARE_AVAILABLE = True
 except ImportError:
     TUSHARE_AVAILABLE = False
-    print("❌ Tushare库未安装，请运行: pip install tushare")
+    logger.error("❌ Tushare库未安装，请运行: pip install tushare")
 
 
 class TushareProvider:
@@ -50,30 +57,31 @@ class TushareProvider:
         if self.enable_cache:
             try:
                 from .cache_manager import get_cache
+
                 self.cache_manager = get_cache()
             except Exception as e:
-                print(f"⚠️ 缓存管理器初始化失败: {e}")
+                logger.warning(f"⚠️ 缓存管理器初始化失败: {e}")
                 self.enable_cache = False
-        
+
         # 获取API token
         if not token:
             token = os.getenv('TUSHARE_TOKEN')
-        
+
         if not token:
-            print("⚠️ 未找到Tushare API token，请设置TUSHARE_TOKEN环境变量")
+            logger.warning("⚠️ 未找到Tushare API token，请设置TUSHARE_TOKEN环境变量")
             return
-        
+
         # 初始化Tushare API
         if TUSHARE_AVAILABLE:
             try:
                 ts.set_token(token)
                 self.api = ts.pro_api()
                 self.connected = True
-                print("✅ Tushare API连接成功")
+                logger.info("✅ Tushare API连接成功")
             except Exception as e:
-                print(f"❌ Tushare API连接失败: {e}")
+                logger.error(f"❌ Tushare API连接失败: {e}")
         else:
-            print("❌ Tushare库不可用")
+            logger.error("❌ Tushare库不可用")
     
     def get_stock_list(self) -> pd.DataFrame:
         """
@@ -83,7 +91,7 @@ class TushareProvider:
             DataFrame: 股票列表数据
         """
         if not self.connected:
-            print("❌ Tushare未连接")
+            logger.error(f"❌ Tushare未连接")
             return pd.DataFrame()
         
         try:
@@ -99,13 +107,13 @@ class TushareProvider:
                     if cached_data is not None:
                         # 检查是否为DataFrame且不为空
                         if hasattr(cached_data, 'empty') and not cached_data.empty:
-                            print(f"📦 从缓存获取股票列表: {len(cached_data)}条")
+                            logger.info(f"📦 从缓存获取股票列表: {len(cached_data)}条")
                             return cached_data
                         elif isinstance(cached_data, str) and cached_data.strip():
-                            print(f"📦 从缓存获取股票列表: 字符串格式")
+                            logger.info(f"📦 从缓存获取股票列表: 字符串格式")
                             return cached_data
             
-            print("🔄 从Tushare获取A股股票列表...")
+            logger.info(f"🔄 从Tushare获取A股股票列表...")
             
             # 获取股票基本信息
             stock_list = self.api.stock_basic(
@@ -115,7 +123,7 @@ class TushareProvider:
             )
             
             if stock_list is not None and not stock_list.empty:
-                print(f"✅ 获取股票列表成功: {len(stock_list)}条")
+                logger.info(f"✅ 获取股票列表成功: {len(stock_list)}条")
                 
                 # 缓存数据
                 if self.enable_cache and self.cache_manager:
@@ -125,17 +133,17 @@ class TushareProvider:
                             data=stock_list,
                             data_source="tushare"
                         )
-                        print(f"💾 A股股票列表已缓存: tushare_stock_list (tushare) -> {cache_key}")
+                        logger.info(f"💾 A股股票列表已缓存: tushare_stock_list (tushare) -> {cache_key}")
                     except Exception as e:
-                        print(f"⚠️ 缓存保存失败: {e}")
+                        logger.error(f"⚠️ 缓存保存失败: {e}")
                 
                 return stock_list
             else:
-                print("⚠️ Tushare返回空数据")
+                logger.warning(f"⚠️ Tushare返回空数据")
                 return pd.DataFrame()
                 
         except Exception as e:
-            print(f"❌ 获取股票列表失败: {e}")
+            logger.error(f"❌ 获取股票列表失败: {e}")
             return pd.DataFrame()
     
     def get_stock_daily(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
@@ -151,39 +159,47 @@ class TushareProvider:
             DataFrame: 日线数据
         """
         if not self.connected:
-            print("❌ Tushare未连接")
+            logger.error(f"❌ Tushare未连接")
             return pd.DataFrame()
         
         try:
             # 标准化股票代码
+            logger.info(f"🔍 [股票代码追踪] get_stock_daily 调用 _normalize_symbol，传入参数: '{symbol}'")
             ts_code = self._normalize_symbol(symbol)
-            
+            logger.info(f"🔍 [股票代码追踪] _normalize_symbol 返回结果: '{ts_code}'")
+
             # 设置默认日期
             if end_date is None:
                 end_date = datetime.now().strftime('%Y%m%d')
             else:
                 end_date = end_date.replace('-', '')
-            
+
             if start_date is None:
                 start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
             else:
                 start_date = start_date.replace('-', '')
-            
-            print(f"🔄 从Tushare获取{ts_code}数据 ({start_date} 到 {end_date})...")
-            
+
+            logger.info(f"🔄 从Tushare获取{ts_code}数据 ({start_date} 到 {end_date})...")
+            logger.info(f"🔍 [股票代码追踪] 调用 Tushare API daily，传入参数: ts_code='{ts_code}', start_date='{start_date}', end_date='{end_date}'")
+
             # 获取日线数据
             data = self.api.daily(
                 ts_code=ts_code,
                 start_date=start_date,
                 end_date=end_date
             )
+
+            logger.info(f"🔍 [股票代码追踪] Tushare API daily 返回数据形状: {data.shape if data is not None and hasattr(data, 'shape') else 'None'}")
+            if data is not None and not data.empty and 'ts_code' in data.columns:
+                unique_codes = data['ts_code'].unique()
+                logger.info(f"🔍 [股票代码追踪] 返回数据中的ts_code: {unique_codes}")
             
             if data is not None and not data.empty:
                 # 数据预处理
                 data = data.sort_values('trade_date')
                 data['trade_date'] = pd.to_datetime(data['trade_date'])
                 
-                print(f"✅ 获取{ts_code}数据成功: {len(data)}条")
+                logger.info(f"✅ 获取{ts_code}数据成功: {len(data)}条")
                 
                 # 缓存数据
                 if self.enable_cache and self.cache_manager:
@@ -193,17 +209,17 @@ class TushareProvider:
                             data=data,
                             data_source="tushare"
                         )
-                        print(f"💾 A股历史数据已缓存: {symbol} (tushare) -> {cache_key}")
+                        logger.info(f"💾 A股历史数据已缓存: {symbol} (tushare) -> {cache_key}")
                     except Exception as e:
-                        print(f"⚠️ 缓存保存失败: {e}")
+                        logger.error(f"⚠️ 缓存保存失败: {e}")
                 
                 return data
             else:
-                print(f"⚠️ Tushare返回空数据: {ts_code}")
+                logger.warning(f"⚠️ Tushare返回空数据: {ts_code}")
                 return pd.DataFrame()
                 
         except Exception as e:
-            print(f"❌ 获取{symbol}数据失败: {e}")
+            logger.error(f"❌ 获取{symbol}数据失败: {e}")
             return pd.DataFrame()
     
     def get_stock_info(self, symbol: str) -> Dict:
@@ -220,13 +236,20 @@ class TushareProvider:
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
         
         try:
+            logger.info(f"🔍 [股票代码追踪] get_stock_info 调用 _normalize_symbol，传入参数: '{symbol}'")
             ts_code = self._normalize_symbol(symbol)
-            
+            logger.info(f"🔍 [股票代码追踪] _normalize_symbol 返回结果: '{ts_code}'")
+
             # 获取股票基本信息
+            logger.info(f"🔍 [股票代码追踪] 调用 Tushare API stock_basic，传入参数: ts_code='{ts_code}'")
             basic_info = self.api.stock_basic(
                 ts_code=ts_code,
                 fields='ts_code,symbol,name,area,industry,market,list_date'
             )
+
+            logger.info(f"🔍 [股票代码追踪] Tushare API stock_basic 返回数据形状: {basic_info.shape if basic_info is not None and hasattr(basic_info, 'shape') else 'None'}")
+            if basic_info is not None and not basic_info.empty:
+                logger.info(f"🔍 [股票代码追踪] 返回数据内容: {basic_info.to_dict('records')}")
             
             if basic_info is not None and not basic_info.empty:
                 info = basic_info.iloc[0]
@@ -244,7 +267,7 @@ class TushareProvider:
                 return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
                 
         except Exception as e:
-            print(f"❌ 获取{symbol}股票信息失败: {e}")
+            logger.error(f"❌ 获取{symbol}股票信息失败: {e}")
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
     
     def get_financial_data(self, symbol: str, period: str = "20231231") -> Dict:
@@ -275,7 +298,7 @@ class TushareProvider:
                 )
                 financials['balance_sheet'] = balance_sheet.to_dict('records') if balance_sheet is not None and not balance_sheet.empty else []
             except Exception as e:
-                print(f"⚠️ 获取资产负债表失败: {e}")
+                logger.error(f"⚠️ 获取资产负债表失败: {e}")
                 financials['balance_sheet'] = []
             
             # 获取利润表
@@ -287,7 +310,7 @@ class TushareProvider:
                 )
                 financials['income_statement'] = income_statement.to_dict('records') if income_statement is not None and not income_statement.empty else []
             except Exception as e:
-                print(f"⚠️ 获取利润表失败: {e}")
+                logger.error(f"⚠️ 获取利润表失败: {e}")
                 financials['income_statement'] = []
             
             # 获取现金流量表
@@ -299,42 +322,60 @@ class TushareProvider:
                 )
                 financials['cash_flow'] = cash_flow.to_dict('records') if cash_flow is not None and not cash_flow.empty else []
             except Exception as e:
-                print(f"⚠️ 获取现金流量表失败: {e}")
+                logger.error(f"⚠️ 获取现金流量表失败: {e}")
                 financials['cash_flow'] = []
             
             return financials
             
         except Exception as e:
-            print(f"❌ 获取{symbol}财务数据失败: {e}")
+            logger.error(f"❌ 获取{symbol}财务数据失败: {e}")
             return {}
     
     def _normalize_symbol(self, symbol: str) -> str:
         """
         标准化股票代码为Tushare格式
-        
+
         Args:
             symbol: 原始股票代码
-            
+
         Returns:
             str: Tushare格式的股票代码
         """
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [股票代码追踪] _normalize_symbol 接收到的原始股票代码: '{symbol}' (类型: {type(symbol)})")
+        logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
+        logger.info(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
+
+        original_symbol = symbol
+
         # 移除可能的前缀
         symbol = symbol.replace('sh.', '').replace('sz.', '')
-        
+        if symbol != original_symbol:
+            logger.info(f"🔍 [股票代码追踪] 移除前缀后: '{original_symbol}' -> '{symbol}'")
+
         # 如果已经是Tushare格式，直接返回
         if '.' in symbol:
+            logger.info(f"🔍 [股票代码追踪] 已经是Tushare格式，直接返回: '{symbol}'")
             return symbol
-        
+
         # 根据代码判断交易所
         if symbol.startswith('6'):
-            return f"{symbol}.SH"  # 上海证券交易所
+            result = f"{symbol}.SH"  # 上海证券交易所
+            logger.info(f"🔍 [股票代码追踪] 上海证券交易所: '{symbol}' -> '{result}'")
+            return result
         elif symbol.startswith(('0', '3')):
-            return f"{symbol}.SZ"  # 深圳证券交易所
+            result = f"{symbol}.SZ"  # 深圳证券交易所
+            logger.info(f"🔍 [股票代码追踪] 深圳证券交易所: '{symbol}' -> '{result}'")
+            return result
         elif symbol.startswith('8'):
-            return f"{symbol}.BJ"  # 北京证券交易所
+            result = f"{symbol}.BJ"  # 北京证券交易所
+            logger.info(f"🔍 [股票代码追踪] 北京证券交易所: '{symbol}' -> '{result}'")
+            return result
         else:
             # 默认深圳
-            return f"{symbol}.SZ"
+            result = f"{symbol}.SZ"
+            logger.info(f"🔍 [股票代码追踪] 默认深圳证券交易所: '{symbol}' -> '{result}'")
+            return result
     
     def search_stocks(self, keyword: str) -> pd.DataFrame:
         """
@@ -360,12 +401,12 @@ class TushareProvider:
             )
             
             results = stock_list[mask]
-            print(f"🔍 搜索'{keyword}'找到{len(results)}只股票")
+            logger.debug(f"🔍 搜索'{keyword}'找到{len(results)}只股票")
             
             return results
             
         except Exception as e:
-            print(f"❌ 搜索股票失败: {e}")
+            logger.error(f"❌ 搜索股票失败: {e}")
             return pd.DataFrame()
 
 

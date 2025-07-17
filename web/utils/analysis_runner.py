@@ -9,6 +9,10 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger, get_logger_manager
+logger = get_logger('web')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -16,13 +20,18 @@ sys.path.insert(0, str(project_root))
 # 确保环境变量正确加载
 load_dotenv(project_root / ".env", override=True)
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import setup_web_logging
+logger = setup_web_logging()
+
 # 添加配置管理器
 try:
     from tradingagents.config.config_manager import token_tracker
     TOKEN_TRACKING_ENABLED = True
+    logger.info("✅ Token跟踪功能已启用")
 except ImportError:
     TOKEN_TRACKING_ENABLED = False
-    print("⚠️ Token跟踪功能未启用")
+    logger.warning("⚠️ Token跟踪功能未启用")
 
 def translate_analyst_labels(text):
     """将分析师的英文标签转换为中文"""
@@ -85,7 +94,7 @@ def extract_risk_assessment(state):
         return risk_assessment
 
     except Exception as e:
-        print(f"提取风险评估数据时出错: {e}")
+        logger.info(f"提取风险评估数据时出错: {e}")
         return None
 
 def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="美股", progress_callback=None):
@@ -105,22 +114,34 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         """更新进度"""
         if progress_callback:
             progress_callback(message, step, total_steps)
-        print(f"[进度] {message}")
+        logger.info(f"[进度] {message}")
 
-    # 添加详细的参数接收日志
-    print(f"🔍 [RUNNER DEBUG] ===== 分析运行器接收参数 =====")
-    print(f"🔍 [RUNNER DEBUG] 接收到的股票代码: '{stock_symbol}' (类型: {type(stock_symbol)})")
-    print(f"🔍 [RUNNER DEBUG] 分析日期: '{analysis_date}'")
-    print(f"🔍 [RUNNER DEBUG] 分析师列表: {analysts}")
-    print(f"🔍 [RUNNER DEBUG] 市场类型: '{market_type}'")
-    print(f"🔍 [RUNNER DEBUG] LLM提供商: '{llm_provider}'")
-    print(f"🔍 [RUNNER DEBUG] LLM模型: '{llm_model}'")
-    print(f"🔍 [RUNNER DEBUG] 研究深度: {research_depth}")
+    # 生成会话ID用于Token跟踪和日志关联
+    session_id = f"analysis_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    # 记录分析开始的详细日志
+    logger_manager = get_logger_manager()
+    import time
+    analysis_start_time = time.time()
+
+    logger_manager.log_analysis_start(
+        logger, stock_symbol, "comprehensive_analysis", session_id
+    )
+
+    logger.info(f"🚀 [分析开始] 股票分析启动",
+               extra={
+                   'stock_symbol': stock_symbol,
+                   'analysis_date': analysis_date,
+                   'analysts': analysts,
+                   'research_depth': research_depth,
+                   'llm_provider': llm_provider,
+                   'llm_model': llm_model,
+                   'market_type': market_type,
+                   'session_id': session_id,
+                   'event_type': 'web_analysis_start'
+               })
 
     update_progress("开始股票分析...")
-
-    # 生成会话ID用于Token跟踪
-    session_id = f"analysis_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # 估算Token使用（用于成本预估）
     if TOKEN_TRACKING_ENABLED:
@@ -135,9 +156,9 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
     dashscope_key = os.getenv("DASHSCOPE_API_KEY")
     finnhub_key = os.getenv("FINNHUB_API_KEY")
 
-    print(f"环境变量检查:")
-    print(f"  DASHSCOPE_API_KEY: {'已设置' if dashscope_key else '未设置'}")
-    print(f"  FINNHUB_API_KEY: {'已设置' if finnhub_key else '未设置'}")
+    logger.info(f"环境变量检查:")
+    logger.info(f"  DASHSCOPE_API_KEY: {'已设置' if dashscope_key else '未设置'}")
+    logger.info(f"  FINNHUB_API_KEY: {'已设置' if finnhub_key else '未设置'}")
 
     if not dashscope_key:
         raise ValueError("DASHSCOPE_API_KEY 环境变量未设置")
@@ -166,7 +187,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
 
             # 统一使用在线工具，避免离线工具的各种问题
             config["online_tools"] = True  # 所有市场都使用统一工具
-            print(f"🔧 [快速分析] {market_type}使用统一工具，确保数据源正确和稳定性")
+            logger.info(f"🔧 [快速分析] {market_type}使用统一工具，确保数据源正确和稳定性")
             if llm_provider == "dashscope":
                 config["quick_think_llm"] = "qwen-turbo"  # 使用最快模型
                 config["deep_think_llm"] = "qwen-plus"
@@ -238,20 +259,20 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         os.makedirs(config["results_dir"], exist_ok=True)
         os.makedirs(config["data_cache_dir"], exist_ok=True)
 
-        print(f"使用配置: {config}")
-        print(f"分析师列表: {analysts}")
-        print(f"股票代码: {stock_symbol}")
-        print(f"分析日期: {analysis_date}")
+        logger.info(f"使用配置: {config}")
+        logger.info(f"分析师列表: {analysts}")
+        logger.info(f"股票代码: {stock_symbol}")
+        logger.info(f"分析日期: {analysis_date}")
 
         # 根据市场类型调整股票代码格式
-        print(f"🔍 [RUNNER DEBUG] ===== 股票代码格式化 =====")
-        print(f"🔍 [RUNNER DEBUG] 原始股票代码: '{stock_symbol}'")
-        print(f"🔍 [RUNNER DEBUG] 市场类型: '{market_type}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] ===== 股票代码格式化 =====")
+        logger.debug(f"🔍 [RUNNER DEBUG] 原始股票代码: '{stock_symbol}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] 市场类型: '{market_type}'")
 
         if market_type == "A股":
             # A股代码不需要特殊处理，保持原样
             formatted_symbol = stock_symbol
-            print(f"🔍 [RUNNER DEBUG] A股代码保持原样: '{formatted_symbol}'")
+            logger.debug(f"🔍 [RUNNER DEBUG] A股代码保持原样: '{formatted_symbol}'")
             update_progress(f"准备分析A股: {formatted_symbol}")
         elif market_type == "港股":
             # 港股代码转为大写，确保.HK后缀
@@ -264,10 +285,10 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         else:
             # 美股代码转为大写
             formatted_symbol = stock_symbol.upper()
-            print(f"🔍 [RUNNER DEBUG] 美股代码转大写: '{stock_symbol}' -> '{formatted_symbol}'")
+            logger.debug(f"🔍 [RUNNER DEBUG] 美股代码转大写: '{stock_symbol}' -> '{formatted_symbol}'")
             update_progress(f"准备分析美股: {formatted_symbol}")
 
-        print(f"🔍 [RUNNER DEBUG] 最终传递给分析引擎的股票代码: '{formatted_symbol}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] 最终传递给分析引擎的股票代码: '{formatted_symbol}'")
 
         # 初始化交易图
         update_progress("初始化分析引擎...")
@@ -275,16 +296,16 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
 
         # 执行分析
         update_progress(f"开始分析 {formatted_symbol} 股票，这可能需要几分钟时间...")
-        print(f"🔍 [RUNNER DEBUG] ===== 调用graph.propagate =====")
-        print(f"🔍 [RUNNER DEBUG] 传递给graph.propagate的参数:")
-        print(f"🔍 [RUNNER DEBUG]   symbol: '{formatted_symbol}'")
-        print(f"🔍 [RUNNER DEBUG]   date: '{analysis_date}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] ===== 调用graph.propagate =====")
+        logger.debug(f"🔍 [RUNNER DEBUG] 传递给graph.propagate的参数:")
+        logger.debug(f"🔍 [RUNNER DEBUG]   symbol: '{formatted_symbol}'")
+        logger.debug(f"🔍 [RUNNER DEBUG]   date: '{analysis_date}'")
 
         state, decision = graph.propagate(formatted_symbol, analysis_date)
 
         # 调试信息
-        print(f"🔍 [DEBUG] 分析完成，decision类型: {type(decision)}")
-        print(f"🔍 [DEBUG] decision内容: {decision}")
+        logger.debug(f"🔍 [DEBUG] 分析完成，decision类型: {type(decision)}")
+        logger.debug(f"🔍 [DEBUG] decision内容: {decision}")
 
         # 格式化结果
         update_progress("分析完成，正在整理结果...")
@@ -329,15 +350,56 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             'session_id': session_id if TOKEN_TRACKING_ENABLED else None
         }
 
+        # 记录分析完成的详细日志
+        analysis_duration = time.time() - analysis_start_time
+
+        # 计算总成本（如果有Token跟踪）
+        total_cost = 0.0
+        if TOKEN_TRACKING_ENABLED:
+            try:
+                total_cost = token_tracker.get_session_cost(session_id)
+            except:
+                pass
+
+        logger_manager.log_analysis_complete(
+            logger, stock_symbol, "comprehensive_analysis", session_id,
+            analysis_duration, total_cost
+        )
+
+        logger.info(f"✅ [分析完成] 股票分析成功完成",
+                   extra={
+                       'stock_symbol': stock_symbol,
+                       'session_id': session_id,
+                       'duration': analysis_duration,
+                       'total_cost': total_cost,
+                       'analysts_used': analysts,
+                       'success': True,
+                       'event_type': 'web_analysis_complete'
+                   })
+
         update_progress("✅ 分析成功完成！")
         return results
 
     except Exception as e:
-        # 打印详细错误信息用于调试
-        print(f"真实分析失败，错误详情: {str(e)}")
-        print(f"错误类型: {type(e).__name__}")
-        import traceback
-        print(f"完整错误堆栈: {traceback.format_exc()}")
+        # 记录分析失败的详细日志
+        analysis_duration = time.time() - analysis_start_time
+
+        logger_manager.log_module_error(
+            logger, "comprehensive_analysis", stock_symbol, session_id,
+            analysis_duration, str(e)
+        )
+
+        logger.error(f"❌ [分析失败] 股票分析执行失败",
+                    extra={
+                        'stock_symbol': stock_symbol,
+                        'session_id': session_id,
+                        'duration': analysis_duration,
+                        'error': str(e),
+                        'error_type': type(e).__name__,
+                        'analysts_used': analysts,
+                        'success': False,
+                        'event_type': 'web_analysis_error'
+                    }, exc_info=True)
 
         # 如果真实分析失败，返回模拟数据用于演示
         return generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, str(e), market_type)
