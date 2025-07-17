@@ -85,7 +85,6 @@ def main():
         analysis_date = "2024-05-10"
 
         # 设置中文输出提示
-        import os
         os.environ['TRADINGAGENTS_LANGUAGE'] = 'zh-CN'
         
         print(f"📈 开始分析股票: {stock_symbol}")
